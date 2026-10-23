@@ -1,0 +1,42 @@
+{
+  "_説明": "差分コピーの設定。文字コードは UTF-8 のまま保存すること。パスの区切り \\ は 2 つ重ねて書く。",
+
+  "SourcePath": "\\\\server\\share\\daily",
+  "_SourcePath": "コピー元のネットワークフォルダ。例: \\\\fileserver\\共有\\日次データ",
+
+  "DestSubFolder": "data",
+  "_DestSubFolder": "コピー先。USB 内のこのフォルダからの相対パス。絶対パス（E:\\data 等）も可",
+
+  "RunFolderFormat": "yyyy-MM-dd",
+  "_RunFolderFormat": "コピー先に作る実行日フォルダの名前書式。空文字にすると日付フォルダを作らない",
+
+  "Recurse": true,
+  "_Recurse": "サブフォルダも対象にするなら true",
+
+  "IncludeFileNames": ["*"],
+  "_IncludeFileNames": "対象にするファイル名パターン。例: [\"*.csv\", \"*.xlsx\"]",
+
+  "ExcludeFileNames": ["~$*", "Thumbs.db", "desktop.ini", "*.tmp"],
+  "_ExcludeFileNames": "除外するファイル名パターン",
+
+  "ExcludeFolders": [],
+  "_ExcludeFolders": "除外するフォルダ名パターン。例: [\"old\", \"backup*\"]",
+
+  "SkipIfModifiedWithinSec": 60,
+  "_SkipIfModifiedWithinSec": "更新からこの秒数以内のファイルは書き込み中とみなして次回に回す。0 で無効",
+
+  "CopyUpdatedFiles": false,
+  "_CopyUpdatedFiles": "true にすると、コピー済みでも中身が更新されたファイルを再コピーする",
+
+  "RequireRemovableDrive": true,
+  "_RequireRemovableDrive": "USB（リムーバブル）以外から起動したら中断する。検証用に false にできる",
+
+  "AllowedVolumeSerial": "",
+  "_AllowedVolumeSerial": "特定の USB だけに限定したいとき、そのボリュームシリアル（実行ログに表示される）を書く。空なら照合しない",
+
+  "FreeSpaceMarginMB": 200,
+  "_FreeSpaceMarginMB": "コピー後に最低これだけ空きが残るようにする（MB）",
+
+  "LogKeepDays": 90,
+  "_LogKeepDays": "logs フォルダのログをこの日数で自動削除する"
+}
