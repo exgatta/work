@@ -8,6 +8,7 @@
     DiffCopy.ps1                 差分をコピーする
     DiffCopy.ps1 -DryRun         コピー対象を表示するだけ（記録もコピーもしない）
     DiffCopy.ps1 -RegisterOnly   今あるファイルを全部「コピー済み」として記録する（初回用）
+    DiffCopy.ps1 -SelectFolder   コピー元直下のフォルダ一覧から対象フォルダを選び、config.json に保存する
 
   設定は同じフォルダの config.json を読む。
   Windows 標準の PowerShell 5.1 で動く範囲の文法だけを使うこと。
@@ -16,7 +17,8 @@
 param(
     [string]$BaseDir = "",
     [switch]$DryRun,
-    [switch]$RegisterOnly
+    [switch]$RegisterOnly,
+    [switch]$SelectFolder
 )
 
 $ErrorActionPreference = 'Stop'
@@ -80,6 +82,28 @@ function ConvertTo-CsvField {
     return '"' + $Value.Replace('"', '""') + '"'
 }
 
+function Expand-DateToken {
+    # "{yyyy-MM}" のような波かっこ部分を今日の日付で置き換える（例: 売上_{yyyy}{MM} → 売上_202610）
+    param([string]$Text)
+    return [regex]::Replace($Text, '\{([^{}]+)\}', { param($m) Get-Date -Format $m.Groups[1].Value })
+}
+
+function Save-TargetFolders {
+    # config.json の TargetFolders だけを書き換える（説明用の "_..." 行や並びは残す）
+    param([string]$Path, [string[]]$Folders)
+    $text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
+    $items = @($Folders | ForEach-Object { '"' + $_.Replace('\', '\\').Replace('"', '\"') + '"' })
+    $value = '[' + ($items -join ', ') + ']'
+    $pattern = '"TargetFolders"\s*:\s*\[[^\]]*\]'
+    if ($text -match $pattern) {
+        $text = [regex]::Replace($text, $pattern, ('"TargetFolders": ' + $value.Replace('$', '$$')), 1)
+    }
+    else {
+        $text = [regex]::Replace($text, '("SourcePath"\s*:\s*"(?:[^"\\]|\\.)*"\s*,)', ('$1' + "`r`n`r`n  " + '"TargetFolders": ' + $value.Replace('$', '$$') + ','), 1)
+    }
+    [System.IO.File]::WriteAllText($Path, $text, (New-Object System.Text.UTF8Encoding($true)))
+}
+
 function Test-AnyLike {
     param([string]$Text, [string[]]$Patterns)
     foreach ($p in $Patterns) {
@@ -94,6 +118,7 @@ function Test-AnyLike {
 # ------------------------------------------------------------
 $Config = @{
     SourcePath              = ''
+    TargetFolders           = @()
     DestSubFolder           = 'data'
     RunFolderFormat         = 'yyyy-MM-dd'
     Recurse                 = $true
@@ -121,7 +146,7 @@ try {
         $prop = $json.PSObject.Properties[$key]
         if ($null -ne $prop -and $null -ne $prop.Value) { $Config[$key] = $prop.Value }
     }
-    foreach ($key in @('IncludeFileNames', 'ExcludeFileNames', 'ExcludeFolders')) {
+    foreach ($key in @('TargetFolders', 'IncludeFileNames', 'ExcludeFileNames', 'ExcludeFolders')) {
         $Config[$key] = @($Config[$key] | ForEach-Object { [string]$_ })
     }
     if ($Config.IncludeFileNames.Count -eq 0) { $Config.IncludeFileNames = @('*') }
@@ -181,6 +206,74 @@ try {
     Write-Log ("コピー元: {0}" -f $srcRoot)
 
     # --------------------------------------------------------
+    # 対象フォルダの選択（-SelectFolder）
+    # --------------------------------------------------------
+    if ($SelectFolder) {
+        $subDirs = @(Get-ChildItem -LiteralPath $srcRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name)
+        if ($subDirs.Count -eq 0) { throw "コピー元直下にフォルダがありません: $srcRoot" }
+        $current = @($Config.TargetFolders)
+        Write-Host ""
+        Write-Host "コピー元直下のフォルダ一覧（現在の対象: " -NoNewline
+        if ($current.Count -eq 0) { Write-Host "すべて" -NoNewline -ForegroundColor Cyan } else { Write-Host ($current -join ', ') -NoNewline -ForegroundColor Cyan }
+        Write-Host "）"
+        Write-Host "  0) すべてのフォルダを対象にする"
+        for ($n = 0; $n -lt $subDirs.Count; $n++) {
+            $mark = ' '
+            foreach ($c in $current) { if ($subDirs[$n].Name -like (Expand-DateToken $c)) { $mark = '*' } }
+            Write-Host ("{0,3}) {1} {2}  (更新 {3:yyyy-MM-dd HH:mm})" -f ($n + 1), $mark, $subDirs[$n].Name, $subDirs[$n].LastWriteTime)
+        }
+        Write-Host ""
+        $answer = Read-Host "対象にするフォルダの番号をカンマ区切りで入力（例: 2,5）。Enter のみで変更なし"
+        if (-not [string]::IsNullOrWhiteSpace($answer)) {
+            $nums = @($answer -split '[,\s、]+' | Where-Object { $_ -ne '' })
+            $picked = New-Object System.Collections.Generic.List[string]
+            $all = $false
+            foreach ($t in $nums) {
+                $v = 0
+                if (-not [int]::TryParse($t, [ref]$v)) { throw "番号として読めません: $t" }
+                if ($v -eq 0) { $all = $true; continue }
+                if ($v -lt 1 -or $v -gt $subDirs.Count) { throw "番号が一覧の範囲外です: $v" }
+                $picked.Add($subDirs[$v - 1].Name)
+            }
+            if ($all) { $picked.Clear() }
+            Save-TargetFolders -Path $ConfigPath -Folders $picked.ToArray()
+            $Config.TargetFolders = @($picked.ToArray())
+            if ($picked.Count -eq 0) { Write-Log "対象フォルダを「すべて」に変更して config.json に保存しました。" 'OK' }
+            else { Write-Log ("対象フォルダを変更して config.json に保存しました: {0}" -f ($picked -join ', ')) 'OK' }
+        }
+        else {
+            Write-Log "対象フォルダは変更しませんでした。"
+        }
+    }
+
+    # --------------------------------------------------------
+    # 対象フォルダの解決（TargetFolders）
+    # --------------------------------------------------------
+    $scanRoots = @()
+    if ($Config.TargetFolders.Count -eq 0) {
+        $scanRoots = @($srcRoot)
+        Write-Log "対象フォルダ: すべて（TargetFolders が空）"
+    }
+    else {
+        foreach ($pat in $Config.TargetFolders) {
+            if ([string]::IsNullOrWhiteSpace($pat)) { continue }
+            $expanded = Expand-DateToken ([string]$pat)
+            $hits = @(Get-Item -Path (Join-Path $srcRoot $expanded) -ErrorAction SilentlyContinue | Where-Object { $_.PSIsContainer })
+            if ($hits.Count -eq 0) {
+                Write-Log ("対象フォルダが見つかりません: {0}" -f $expanded) 'WARN'
+                continue
+            }
+            foreach ($h in $hits) {
+                if ($scanRoots -notcontains $h.FullName) { $scanRoots += $h.FullName }
+                Write-Log ("対象フォルダ: {0}" -f $h.FullName.Substring($srcRoot.Length).TrimStart('\', '/'))
+            }
+        }
+        if ($scanRoots.Count -eq 0) {
+            throw ("TargetFolders に指定したフォルダが 1 つも見つかりません（{0}）。フォルダ名が変わった場合は「対象フォルダ選択.bat」で選び直してください。" -f ($Config.TargetFolders -join ', '))
+        }
+    }
+
+    # --------------------------------------------------------
     # コピー先
     # --------------------------------------------------------
     $destBase = [string]$Config.DestSubFolder
@@ -212,11 +305,14 @@ try {
     # --------------------------------------------------------
     # コピー元の走査
     # --------------------------------------------------------
-    $scanErrors = @()
-    $gciParams = @{ LiteralPath = $srcRoot; File = $true; ErrorAction = 'SilentlyContinue'; ErrorVariable = 'scanErrors' }
-    if ($Config.Recurse) { $gciParams['Recurse'] = $true }
-    $allFiles = @(Get-ChildItem @gciParams)
-    foreach ($e in $scanErrors) { Write-Log ("走査エラー: {0}" -f $e.Exception.Message) 'WARN' }
+    $allFiles = @()
+    foreach ($root in $scanRoots) {
+        $scanErrors = @()
+        $gciParams = @{ LiteralPath = $root; File = $true; ErrorAction = 'SilentlyContinue'; ErrorVariable = 'scanErrors' }
+        if ($Config.Recurse) { $gciParams['Recurse'] = $true }
+        $allFiles += @(Get-ChildItem @gciParams)
+        foreach ($e in $scanErrors) { Write-Log ("走査エラー: {0}" -f $e.Exception.Message) 'WARN' }
+    }
     Write-Log ("コピー元のファイル数: {0}" -f $allFiles.Count)
 
     $nowUtc = (Get-Date).ToUniversalTime()

@@ -4,6 +4,9 @@
   "SourcePath": "\\\\server\\share\\daily",
   "_SourcePath": "コピー元のネットワークフォルダ。例: \\\\fileserver\\共有\\日次データ",
 
+  "TargetFolders": [],
+  "_TargetFolders": "コピー元直下の対象フォルダ名。空なら全フォルダ。複数可・ワイルドカード可・日付トークン可。例: [\"営業部\", \"売上_{yyyy}{MM}\", \"2026-*\"]。「対象フォルダ選択.bat」で一覧から選んで保存もできる",
+
   "DestSubFolder": "data",
   "_DestSubFolder": "コピー先。USB 内のこのフォルダからの相対パス。絶対パス（E:\\data 等）も可",
 
